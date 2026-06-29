@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Docker Tutorial 1 — What is Docker? Why Docker?</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>What is Docker? Why Docker?</h1>
+  <p>Tutorial 1 of 10 — a practical Docker series</p>
+</header>
+
+<div class="series-nav">
+  <a href="1-what-why.html" class="current">1. What &amp; Why</a>
+  <a href="2-images.html">2. Images</a>
+  <a href="3-containers.html">3. Containers</a>
+  <a href="4-volumes.html">4. Volumes</a>
+  <a href="5-network.html">5. Network</a>
+  <a href="6-dockerfile.html">6. Dockerfile</a>
+  <a href="7-docker-compose.html">7. Compose</a>
+  <a href="8-env.html">8. Env</a>
+  <a href="9-secrets.html">9. Secrets</a>
+  <a href="10-anti-patterns.html">10. Anti-Patterns</a>
+</div>
+
+<nav>
+  <ul>
+    <li><a href="#problem">1. The problem before containers</a></li>
+    <li><a href="#what">2. What Docker actually is</a></li>
+    <li><a href="#vm">3. Docker vs. a virtual machine</a></li>
+    <li><a href="#pieces">4. The moving pieces: image, container, engine</a></li>
+    <li><a href="#why">5. Why Docker, in practice</a></li>
+    <li><a href="#commands">6. First commands to try</a></li>
+    <li><a href="#next">7. Where this leads</a></li>
+  </ul>
+</nav>
+
+<main>
+
+<section id="problem">
+  <h2>1. The problem before containers</h2>
+  <p>
+    Say you need to run a web server, a database, and an application server together — all on one
+    machine, all talking to each other. Before containers, you'd install every one of those directly
+    on the host: different package versions, different config file locations, different init
+    systems, and a real chance that installing one service's dependency breaks another's. "Works on
+    my machine" became a running joke for exactly this reason.
+  </p>
+  <div class="box warn">
+    <strong>The core pain:</strong> software needs a very specific environment (OS libraries, runtime
+    versions, config) to run correctly, and that environment is hard to reproduce identically on
+    another machine — or even on the same machine six months later.
+  </div>
+</section>
+
+<section id="what">
+  <h2>2. What Docker actually is</h2>
+  <p>
+    Docker is a tool for packaging an application together with everything it needs to run —
+    code, runtime, system libraries, config — into a single unit called an <strong>image</strong>,
+    and then running that unit as an isolated process called a <strong>container</strong>.
+  </p>
+  <p>
+    The key idea: a container is <em>not</em> a separate computer. It's a normal process on your
+    host's Linux kernel, just fenced off using kernel features (namespaces, cgroups) so it gets its
+    own filesystem, network interface, and process tree — while still sharing the host's kernel
+    directly, with none of a VM's overhead.
+  </p>
+  <div class="compare">
+    <div class="compare-card bad">
+      <h4><span class="dot dot-bad"></span>Without containers</h4>
+      <div class="stack">
+        <div class="stack-layer mixed">
+          <strong>Frontend + Backend + DB</strong>
+          <span>installed directly on the host — sharing libraries, fighting for ports and versions</span>
+        </div>
+        <div class="stack-layer kernel">Host OS kernel</div>
+      </div>
+    </div>
+    <div class="compare-vs">vs</div>
+    <div class="compare-card good">
+      <h4><span class="dot dot-good"></span>With containers</h4>
+      <div class="stack">
+        <div class="stack-row">
+          <div class="stack-cell">Frontend</div>
+          <div class="stack-cell">Backend</div>
+          <div class="stack-cell">DB</div>
+        </div>
+        <div class="stack-layer engine">Docker Engine</div>
+        <div class="stack-layer kernel">Host OS kernel</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="vm">
+  <h2>3. Docker vs. a virtual machine</h2>
+  <table>
+    <tr><th></th><th>Virtual Machine</th><th>Docker container</th></tr>
+    <tr><td>What it virtualizes</td><td>Entire hardware + its own kernel</td><td>Just the process, sharing the host kernel</td></tr>
+    <tr><td>Boot time</td><td>Seconds to minutes</td><td>Milliseconds to seconds</td></tr>
+    <tr><td>Size</td><td>Gigabytes (full OS image)</td><td>Megabytes (just app + deps)</td></tr>
+    <tr><td>Isolation strength</td><td>Strong — separate kernel</td><td>Weaker — shared kernel, namespaced</td></tr>
+    <tr><td>Typical use</td><td>One heavyweight isolation boundary (a whole guest OS)</td><td>Many lightweight processes sharing one kernel</td></tr>
+  </table>
+  <div class="box tip">
+    <strong>In practice:</strong> a VM is often the outer boundary (a cloud instance, a lab machine),
+    and Docker gives you lightweight isolation <em>inside</em> that VM for each service, instead of
+    installing a web server, a database, and an app all loose on one filesystem.
+  </div>
+</section>
+
+<section id="pieces">
+  <h2>4. The moving pieces: image, container, engine</h2>
+  <ul>
+    <li><strong>Image</strong> — a read-only template: filesystem snapshot + metadata (what command to run, what ports to expose). Built once, reused everywhere. Covered in Tutorial 2.</li>
+    <li><strong>Container</strong> — a running (or stopped) instance of an image, with its own writable layer on top. Covered in Tutorial 3.</li>
+    <li><strong>Docker Engine</strong> — the daemon (<code>dockerd</code>) running on your host/VM that builds images and runs containers, talked to via the <code>docker</code> CLI.</li>
+  </ul>
+  <pre><code># The engine is what you're actually talking to:
+docker version
+docker info</code></pre>
+  <div class="box tip">
+    Mental shortcut: an <strong>image</strong> is the recipe, a <strong>container</strong> is the dish
+    you cooked from it. You can cook the same recipe (image) into many independent dishes
+    (containers) — that's exactly what lets you run several instances of the same service from one image.
+  </div>
+</section>
+
+<section id="why">
+  <h2>5. Why Docker, in practice</h2>
+  <ul>
+    <li><strong>One service per container</strong> is the convention that makes Docker's unit of work — build, scale, restart, replace — match a single responsibility, instead of one fat container doing five jobs.</li>
+    <li><strong>Reproducibility</strong> — a Dockerfile is the single source of truth for how a service is built and configured. Anyone gets the exact same setup by running <code>docker compose up</code>, instead of following a setup doc that drifts out of date.</li>
+    <li><strong>Isolation without VM overhead</strong> — many services run side by side on one host, each with its own filesystem and process space, without paying for a separate VM per service.</li>
+    <li><strong>Composable networking and storage</strong> — instead of services finding each other via hardcoded IPs and shared host directories, Docker gives you named networks and volumes (Tutorials 4 and 5) as first-class, declarative building blocks.</li>
+    <li><strong>It scales the same mental model from one container to a whole stack</strong> — the same image/container/network/volume primitives apply whether you're running one service locally or a dozen in production.</li>
+  </ul>
+  <div class="box warn">
+    <strong>What Docker is not for:</strong> it's not a security sandbox against malicious code, and
+    it's not a substitute for understanding the services you're containerizing. You still need to
+    know why a database needs persistent storage or why a PHP app needs PHP-FPM — Docker just gives
+    you a clean, repeatable place to express that knowledge.
+  </div>
+</section>
+
+<section id="commands">
+  <h2>6. First commands to try</h2>
+  <pre><code># Confirm the engine is alive and see resource usage
+docker info
+docker version
+
+# Pull and run something trivial to see a container exist and exit
+docker run hello-world
+
+# See what's currently running on your machine
+docker ps
+docker ps -a   # include stopped containers</code></pre>
+</section>
+
+<section id="next">
+  <h2>7. Where this leads</h2>
+  <p>
+    This tutorial covered the "what" and "why." The next one (Tutorial 2) gets concrete: how images
+    are actually built layer by layer, how <code>docker pull</code>/<code>docker build</code> work,
+    and how to inspect an image before you ever run it.
+  </p>
+</section>
+
+</main>
+
+<footer>
+  Docker Tutorial 1 of 10 — What is Docker? Why Docker?
+</footer>
+
+</body>
+</html>

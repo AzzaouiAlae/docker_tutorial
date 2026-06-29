@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Docker Tutorial 7 — Docker Compose</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Docker Compose</h1>
+  <p>Tutorial 7 of 10 — a practical Docker series</p>
+</header>
+
+<div class="series-nav">
+  <a href="1-what-why.html">1. What &amp; Why</a>
+  <a href="2-images.html">2. Images</a>
+  <a href="3-containers.html">3. Containers</a>
+  <a href="4-volumes.html">4. Volumes</a>
+  <a href="5-network.html">5. Network</a>
+  <a href="6-dockerfile.html">6. Dockerfile</a>
+  <a href="7-docker-compose.html" class="current">7. Compose</a>
+  <a href="8-env.html">8. Env</a>
+  <a href="9-secrets.html">9. Secrets</a>
+  <a href="10-anti-patterns.html">10. Anti-Patterns</a>
+</div>
+
+<nav>
+  <ul>
+    <li><a href="#what">1. What Compose solves</a></li>
+    <li><a href="#standalone">2. A standalone container vs. one managed by Compose</a></li>
+    <li><a href="#anatomy">3. Anatomy of docker-compose.yml</a></li>
+    <li><a href="#service-keys">4. Common service keys</a></li>
+    <li><a href="#depends">5. depends_on and start order</a></li>
+    <li><a href="#case">6. A real service block, explained</a></li>
+    <li><a href="#commands">7. Useful commands</a></li>
+    <li><a href="#makefile">8. Wrapping Compose in a Makefile</a></li>
+  </ul>
+</nav>
+
+<main>
+
+<section id="what">
+  <h2>1. What Compose solves</h2>
+  <p>
+    Without Compose, running several interconnected services by hand means a separate
+    <code>docker build</code> and <code>docker run</code> command per service, each with matching
+    network, volume, env, and secret flags, executed in the right order, every single time. Compose
+    lets you declare that entire multi-container setup once, in <code>docker-compose.yml</code>, and
+    bring it all up or down with one command.
+  </p>
+</section>
+
+<section id="standalone">
+  <h2>2. A standalone container vs. one managed by Compose</h2>
+  <p>
+    <code>docker run mariadb</code> and a <code>mariadb:</code> service block in
+    <code>docker-compose.yml</code> both end up starting the same image as a container — but they
+    aren't equivalent in practice, because Compose changes several defaults around that container:
+  </p>
+  <table>
+    <tr><th>Aspect</th><th><code>docker run</code> (standalone)</th><th>Compose-managed</th></tr>
+    <tr><td>Networking</td><td>Default <code>bridge</code> network unless you pass <code>--network</code> — no automatic DNS by name</td><td>Attached to the project's user-defined network automatically, with DNS resolution by service name (Tutorial 5)</td></tr>
+    <tr><td>Naming</td><td>Random name unless you pass <code>--name</code></td><td><code>container_name:</code>, or a predictable <code>project_service_1</code> default</td></tr>
+    <tr><td>Lifecycle</td><td>You track and restart it yourself; <code>--restart</code> set manually</td><td><code>restart:</code> policy declared once, reapplied consistently every <code>up</code></td></tr>
+    <tr><td>Dependencies</td><td>You sequence the commands yourself</td><td><code>depends_on</code> orders starts/stops across the whole stack</td></tr>
+    <tr><td>Reproducing the setup</td><td>Re-type (or re-script) every flag by hand</td><td><code>docker compose up</code> reads the same flags back out of the file</td></tr>
+  </table>
+  <div class="box tip">
+    A single <code>docker run</code> is still the right tool for a one-off, throwaway container
+    (testing an image, debugging in isolation). The moment a container needs to <em>consistently</em>
+    talk to siblings, restart the same way every time, and come up together with them, that's the
+    signal to put it in <code>docker-compose.yml</code> instead of a long-lived hand-typed command.
+  </div>
+</section>
+
+<section id="anatomy">
+  <h2>3. Anatomy of docker-compose.yml</h2>
+  <p>A compose file has up to four top-level blocks:</p>
+  <pre><code>services:    # one entry per container — the bulk of the file
+  nginx:
+    ...
+
+volumes:     # named volumes referenced by services (Tutorial 4)
+  wordpress_data:
+    ...
+
+networks:    # named networks referenced by services (Tutorial 5)
+  app_network:
+    ...
+
+secrets:     # files mounted read-only into services (Tutorial 9)
+  db_password:
+    ...</code></pre>
+</section>
+
+<section id="service-keys">
+  <h2>4. Common service keys</h2>
+  <table>
+    <tr><th>Key</th><th>Purpose</th></tr>
+    <tr><td><code>build</code></td><td>Path to the Dockerfile's build context — Compose builds the image from here.</td></tr>
+    <tr><td><code>image</code></td><td>Tag to give the built image (or to pull, if no <code>build</code> key).</td></tr>
+    <tr><td><code>container_name</code></td><td>Fixed container name instead of an auto-generated <code>project_service_1</code>.</td></tr>
+    <tr><td><code>restart</code></td><td>Restart policy (Tutorial 3) — e.g. <code>on-failure</code>.</td></tr>
+    <tr><td><code>ports</code></td><td>Host:container port mapping — the only way traffic reaches in from outside the host.</td></tr>
+    <tr><td><code>volumes</code></td><td>Mounts, named-volume or bind (Tutorial 4).</td></tr>
+    <tr><td><code>networks</code></td><td>Which network(s) this service attaches to (Tutorial 5).</td></tr>
+    <tr><td><code>env_file</code> / <code>environment</code></td><td>Environment variables (Tutorial 8).</td></tr>
+    <tr><td><code>secrets</code></td><td>Which top-level secrets get mounted into this container (Tutorial 9).</td></tr>
+    <tr><td><code>depends_on</code></td><td>Start-order hints — see section 5.</td></tr>
+    <tr><td><code>init</code></td><td>Runs a minimal init process as PID 1 that reaps zombies and forwards signals to your real process.</td></tr>
+  </table>
+</section>
+
+<section id="depends">
+  <h2>5. depends_on and start order</h2>
+  <p>
+    <code>depends_on</code> controls only the order containers are <em>started</em> in — by default
+    it does not wait for the dependency's application to be ready (covered in depth in Tutorial 5,
+    section 6). Compose still starts dependencies first and stops dependents first, which is enough
+    to express "nginx's container shouldn't even attempt to start until wordpress's container exists."
+  </p>
+  <pre><code>nginx:
+  depends_on:
+    - wordpress
+    - resume
+    - grafana
+    - adminer</code></pre>
+</section>
+
+<section id="case">
+  <h2>6. A real service block, explained</h2>
+  <p>A typical <code>nginx</code> service in front of a WordPress stack looks like this:</p>
+  <pre><code>nginx:
+  build: ./nginx
+  image: nginx:1.0
+  container_name: nginx
+  restart: on-failure
+  init: true
+  secrets:
+    - nginx_crt
+    - nginx_key
+  depends_on:
+    - wordpress
+  ports:
+    - "${NGINX_PORT}:${NGINX_PORT}"
+  volumes:
+    - wordpress_data:/var/www/
+  networks:
+    - app_network
+  env_file:
+    - .env</code></pre>
+  <ul>
+    <li><strong>build + image</strong> — nginx is built from your own Dockerfile, not pulled, and tagged <code>nginx:1.0</code>.</li>
+    <li><strong>secrets: nginx_crt / nginx_key</strong> — the TLS certificate and key are injected as files, not baked into the image or passed as env vars (Tutorial 9).</li>
+    <li><strong>depends_on</strong> — nginx proxies to wordpress, so that container must at least have started first.</li>
+    <li><strong>ports: "${NGINX_PORT}:${NGINX_PORT}"</strong> — the only port exposed to the host; everything else stays internal to <code>app_network</code>.</li>
+    <li><strong>volumes: wordpress_data:/var/www/</strong> — nginx reads WordPress's PHP files directly off the same volume WordPress writes to, so it can serve static assets without proxying every request.</li>
+    <li><strong>env_file: .env</strong> — pulls in the variables covered in Tutorial 8, including <code>${NGINX_PORT}</code> used right above it.</li>
+  </ul>
+  <p>Compare with a <code>mariadb</code> service that has no <code>ports:</code> key at all — it's reachable only from other containers on <code>app_network</code>, never from outside the host, which is good security practice for a database.</p>
+</section>
+
+<section id="commands">
+  <h2>7. Useful commands</h2>
+  <pre><code># Build (or rebuild) all images and start every service
+docker compose up --build
+
+# Run detached (in the background)
+docker compose up -d
+
+# Stop and remove containers, networks (keeps volumes)
+docker compose down
+
+# Stop and remove containers, networks, AND named volumes — destroys data
+docker compose down -v
+
+# Logs for one service, or all of them
+docker compose logs -f wordpress
+docker compose logs -f
+
+# Rebuild just one service's image
+docker compose build mariadb
+
+# Validate the file without running anything
+docker compose config</code></pre>
+</section>
+
+<section id="makefile">
+  <h2>8. Wrapping Compose in a Makefile</h2>
+  <p>
+    <code>docker compose</code> commands are long and easy to fat-finger, so it's common to wrap the
+    handful you actually use day to day behind short <code>make</code> targets:
+  </p>
+  <pre><code>COMPOSE = docker compose -f srcs/docker-compose.yml
+
+build:
+	$(COMPOSE) build
+
+up:
+	$(COMPOSE) up -d
+
+down:
+	$(COMPOSE) down
+
+clean: down
+	docker system prune -f
+
+fclean: clean
+	$(COMPOSE) down -v
+	docker system prune -af --volumes
+
+re: fclean up
+
+.PHONY: build up down clean fclean re</code></pre>
+  <ul>
+    <li><strong><code>up</code> / <code>down</code></strong> — the two you run constantly; matching short names to the Compose subcommands they wrap.</li>
+    <li><strong><code>clean</code></strong> — stops the stack and prunes dangling images/build cache, without touching volumes.</li>
+    <li><strong><code>fclean</code></strong> — the destructive one: <code>down -v</code> plus a full prune, deleting volumes too. Named so it reads as strictly worse than <code>clean</code>, not a synonym for it.</li>
+    <li><strong><code>re</code></strong> — the everyday "start over" target: tear everything down (including volumes) and bring it back up fresh.</li>
+  </ul>
+  <div class="box warn">
+    <strong>Naming consistency matters more than the specific names.</strong> Whatever convention you
+    pick, keep <code>down -v</code> (volume-destroying) behind a target that's clearly more
+    destructive than your plain <code>down</code>/<code>clean</code> — a teammate (or future you)
+    running <code>make clean</code> expecting to keep their data is exactly the kind of mistake this
+    is meant to prevent.
+  </div>
+</section>
+
+</main>
+
+<footer>
+  Docker Tutorial 7 of 10 — Docker Compose
+</footer>
+
+</body>
+</html>

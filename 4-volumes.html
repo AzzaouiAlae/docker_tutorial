@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Docker Tutorial 4 — Volumes</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Docker Volumes</h1>
+  <p>Tutorial 4 of 10 — a practical Docker series</p>
+</header>
+
+<div class="series-nav">
+  <a href="1-what-why.html">1. What &amp; Why</a>
+  <a href="2-images.html">2. Images</a>
+  <a href="3-containers.html">3. Containers</a>
+  <a href="4-volumes.html" class="current">4. Volumes</a>
+  <a href="5-network.html">5. Network</a>
+  <a href="6-dockerfile.html">6. Dockerfile</a>
+  <a href="7-docker-compose.html">7. Compose</a>
+  <a href="8-env.html">8. Env</a>
+  <a href="9-secrets.html">9. Secrets</a>
+  <a href="10-anti-patterns.html">10. Anti-Patterns</a>
+</div>
+
+<nav>
+  <ul>
+    <li><a href="#problem">1. Why containers alone aren't enough for data</a></li>
+    <li><a href="#types">2. Named volumes vs. bind mounts vs. tmpfs</a></li>
+    <li><a href="#named">3. Named volumes in depth</a></li>
+    <li><a href="#bind">4. Bind mounts in depth</a></li>
+    <li><a href="#compose">5. Volumes in docker-compose.yml</a></li>
+    <li><a href="#case">6. Bind-mounting a fixed host path</a></li>
+    <li><a href="#verify">7. Proving the data actually survives</a></li>
+    <li><a href="#commands">8. Useful commands</a></li>
+  </ul>
+</nav>
+
+<main>
+
+<section id="problem">
+  <h2>1. Why containers alone aren't enough for data</h2>
+  <p>
+    A container's writable layer lives and dies with that container. <code>docker rm</code> a
+    MariaDB container and its <code>/var/lib/mysql</code> data — every WordPress post, every user —
+    disappears with it. Volumes solve this by moving the data <em>outside</em> the container's
+    lifecycle, into storage managed by the Docker host that survives container removal and rebuilds.
+  </p>
+  <div class="box warn">
+    This is the whole reason volumes exist: any data that must survive a
+    <code>docker compose down</code> / <code>up</code> cycle, a crash, or a rebuild has to live in a
+    volume, not in the container's own writable layer.
+  </div>
+</section>
+
+<section id="types">
+  <h2>2. Named volumes vs. bind mounts vs. tmpfs</h2>
+  <table>
+    <tr><th>Type</th><th>Where data lives</th><th>Managed by</th><th>Typical use</th></tr>
+    <tr><td>Named volume</td><td><code>/var/lib/docker/volumes/...</code></td><td>Docker</td><td>Database files, persistent app state</td></tr>
+    <tr><td>Bind mount</td><td>Any host path you choose</td><td>You</td><td>Sharing host config/code, e.g. <code>/srv/app/data</code></td></tr>
+    <tr><td>tmpfs mount</td><td>Host RAM, never written to disk</td><td>Docker</td><td>Secrets/temp data that must never persist</td></tr>
+  </table>
+  <div class="box tip">
+    Some setups require volumes mounted at a specific, known host path rather than wherever Docker
+    decides to put them. That's still a <strong>bind mount</strong> with a fixed location, even
+    though Compose's <code>volumes:</code> syntax for it (a named entry with <code>driver_opts</code>)
+    looks similar to a plain named volume.
+  </div>
+</section>
+
+<section id="named">
+  <h2>3. Named volumes in depth</h2>
+  <p>
+    A named volume is a directory Docker manages for you, identified by name instead of path.
+    Docker decides where it physically lives; you just reference it by name from any container.
+  </p>
+  <pre><code>docker volume create mariadb_data
+docker run -v mariadb_data:/var/lib/mysql mariadb</code></pre>
+  <p>
+    Multiple containers can mount the same named volume simultaneously — useful for sharing data
+    between services without a bind mount tied to one specific host path.
+  </p>
+</section>
+
+<section id="bind">
+  <h2>4. Bind mounts in depth</h2>
+  <p>
+    A bind mount maps an exact host directory into the container. Changes are visible
+    instantly on both sides — it's literally the same files, not a copy.
+  </p>
+  <pre><code>docker run -v /srv/app/data/wordpress:/var/www/html wordpress
+
+# Equivalent, more explicit syntax
+docker run --mount type=bind,source=/srv/app/data/wordpress,target=/var/www/html wordpress</code></pre>
+  <div class="box warn">
+    <strong>Permissions gotcha:</strong> bind-mounted directories keep the host's ownership and
+    permissions. If the host directory is owned by your user but the process inside the container
+    runs as a different UID (e.g. <code>www-data</code>), you can get permission-denied errors
+    even though the path is correctly mounted.
+  </div>
+</section>
+
+<section id="compose">
+  <h2>5. Volumes in docker-compose.yml</h2>
+  <pre><code>services:
+  mariadb:
+    volumes:
+      - mariadb_data:/var/lib/mysql
+
+volumes:
+  mariadb_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /srv/app/data/mariadb</code></pre>
+  <div class="box tip">
+    This pattern — a top-level <code>volumes:</code> entry whose <code>driver_opts</code> point at
+    a fixed host path — gives you a Compose-managed volume name <em>and</em> a guaranteed, inspectable
+    host location. Useful whenever you need to know exactly where on disk a service's data lives,
+    rather than letting Docker pick the path for you.
+  </div>
+</section>
+
+<section id="case">
+  <h2>6. Bind-mounting a fixed host path</h2>
+  <p>
+    A database's data directory or an app's web root is often backed by a volume defined this way,
+    so that:
+  </p>
+  <ul>
+    <li><code>docker compose down</code> (without <code>-v</code>) removes containers but leaves the volumes and their data untouched.</li>
+    <li>A fresh <code>docker compose up</code> reattaches the same volumes, and the app/database pick up right where they left off instead of re-running first-time setup.</li>
+    <li>The data is physically sitting under a known path on the host, inspectable and backup-able outside of Docker entirely.</li>
+  </ul>
+  <div class="box warn">
+    <strong>Destructive command to know about:</strong> <code>docker compose down -v</code> deletes
+    the named volumes too — that's the one command that actually wipes this kind of persisted data.
+    Never run it casually on a stack you care about.
+  </div>
+</section>
+
+<section id="verify">
+  <h2>7. Proving the data actually survives</h2>
+  <p>
+    It's easy to <em>believe</em> a volume persists data without ever checking. Recreating the
+    container and confirming the data is still there only takes a minute, and it's the only way to
+    actually know your setup is correct rather than assumed correct:
+  </p>
+  <pre><code># 1. Write something identifiable through the running container
+docker exec mariadb sh -c "echo hello > /var/lib/mysql/proof.txt"
+
+# 2. Remove the container entirely — NOT the volume
+docker compose rm -sf mariadb
+
+# 3. Recreate it fresh from the same compose file
+docker compose up -d mariadb
+
+# 4. Confirm the file is still there, in the new container
+docker exec mariadb cat /var/lib/mysql/proof.txt   # → hello</code></pre>
+  <p>
+    The new container in step 3 has a brand-new writable layer — none of its own filesystem history
+    carries over. The only reason <code>proof.txt</code> survives is that it was never actually
+    stored in that writable layer; it was in the named volume, which step 2 left untouched.
+  </p>
+  <div class="box warn">
+    If you instead ran <code>docker compose down -v</code> between steps 1 and 3, the file would be
+    gone — that's the volume itself being deleted, not just the container. Re-running this same
+    check after a <code>down -v</code> is a quick way to see the difference firsthand.
+  </div>
+</section>
+
+<section id="commands">
+  <h2>8. Useful commands</h2>
+  <pre><code># List, inspect, remove volumes
+docker volume ls
+docker volume inspect mariadb_data
+docker volume rm mariadb_data
+
+# Remove all unused (unreferenced) volumes
+docker volume prune
+
+# See exactly what's mounted where on a running container
+docker inspect -f '{{json .Mounts}}' mariadb</code></pre>
+</section>
+
+</main>
+
+<footer>
+  Docker Tutorial 4 of 10 — Volumes
+</footer>
+
+</body>
+</html>

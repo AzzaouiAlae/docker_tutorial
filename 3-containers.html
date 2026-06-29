@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Docker Tutorial 3 — Containers</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Docker Containers</h1>
+  <p>Tutorial 3 of 10 — a practical Docker series</p>
+</header>
+
+<div class="series-nav">
+  <a href="1-what-why.html">1. What &amp; Why</a>
+  <a href="2-images.html">2. Images</a>
+  <a href="3-containers.html" class="current">3. Containers</a>
+  <a href="4-volumes.html">4. Volumes</a>
+  <a href="5-network.html">5. Network</a>
+  <a href="6-dockerfile.html">6. Dockerfile</a>
+  <a href="7-docker-compose.html">7. Compose</a>
+  <a href="8-env.html">8. Env</a>
+  <a href="9-secrets.html">9. Secrets</a>
+  <a href="10-anti-patterns.html">10. Anti-Patterns</a>
+</div>
+
+<nav>
+  <ul>
+    <li><a href="#what">1. What a container actually is</a></li>
+    <li><a href="#lifecycle">2. Container lifecycle</a></li>
+    <li><a href="#isolation">3. Namespaces and cgroups</a></li>
+    <li><a href="#pid1">4. PID 1 and why your service must stay foreground</a></li>
+    <li><a href="#restart">5. Restart policies</a></li>
+    <li><a href="#exec">6. Getting inside a running container</a></li>
+    <li><a href="#case">7. Bootstrapping an app on first start</a></li>
+    <li><a href="#commands">8. Useful commands</a></li>
+  </ul>
+</nav>
+
+<main>
+
+<section id="what">
+  <h2>1. What a container actually is</h2>
+  <p>
+    A container is an image plus one writable layer, running as an isolated process tree on the
+    host kernel. Nothing about a container is virtualized hardware — it's <code>dockerd</code>
+    calling Linux kernel APIs (namespaces, cgroups, sometimes seccomp/AppArmor) around a normal
+    process. Stop the container and that writable layer's changes are gone unless you wrote them
+    to a volume (Tutorial 4) or bind mount.
+  </p>
+  <div class="box warn">
+    <strong>Containers are ephemeral by design.</strong> Treat the container's own filesystem as
+    disposable. Anything that must survive a restart — a database's data directory, WordPress's
+    uploads — belongs in a volume, not in the container's writable layer.
+  </div>
+</section>
+
+<section id="lifecycle">
+  <h2>2. Container lifecycle</h2>
+  <div class="diagram">
+docker create  ──►  Created
+                       │  docker start
+                       ▼
+                    Running  ──► docker pause ──► Paused
+                       │                              │ docker unpause
+                       │ docker stop / process exits   ▼
+                       ▼                            Running
+                    Exited (stopped, layer kept)
+                       │  docker rm
+                       ▼
+                    (gone)
+  </div>
+  <p>
+    <code>docker run</code> is really <code>create</code> + <code>start</code> in one call. A
+    stopped container still exists on disk (you can inspect its logs, restart it) until you
+    <code>docker rm</code> it.
+  </p>
+</section>
+
+<section id="isolation">
+  <h2>3. Namespaces and cgroups</h2>
+  <table>
+    <tr><th>Kernel feature</th><th>What it isolates</th></tr>
+    <tr><td>PID namespace</td><td>Container sees only its own process tree, starting at PID 1</td></tr>
+    <tr><td>Network namespace</td><td>Its own interfaces, routes, ports (Tutorial 5)</td></tr>
+    <tr><td>Mount namespace</td><td>Its own filesystem view (the image layers + writable layer)</td></tr>
+    <tr><td>UTS namespace</td><td>Its own hostname</td></tr>
+    <tr><td>cgroups</td><td>Not isolation but limiting — caps CPU/memory the container can use</td></tr>
+  </table>
+  <pre><code># Limit a container's resources
+docker run --memory=512m --cpus=1 mariadb</code></pre>
+</section>
+
+<section id="pid1">
+  <h2>4. PID 1 and why your service must stay foreground</h2>
+  <p>
+    The process named in <code>CMD</code>/<code>ENTRYPOINT</code> becomes PID 1 inside the
+    container. When that process exits, the container exits — Docker doesn't keep a container
+    alive just because something is technically still running inside it. This is exactly why
+    "no <code>tail -f</code>, no infinite sleep loop" is a hard rule in good Dockerfile practice:
+    PID 1 must <em>be</em> your actual service, running in the foreground.
+  </p>
+  <pre><code># Wrong — container exits as soon as bash returns, nginx never really "owns" the container
+CMD ["sh", "-c", "nginx && sleep infinity"]
+
+# Right — nginx itself is PID 1, runs in the foreground
+CMD ["nginx", "-g", "daemon off;"]</code></pre>
+  <div class="box warn">
+    PID 1 also has a special responsibility: reaping zombie processes and forwarding signals
+    (<code>SIGTERM</code> on <code>docker stop</code>). Services not designed to be PID 1
+    sometimes need a flag (<code>daemon off;</code> for nginx, <code>--nodaemonize</code> for some
+    services) so they handle signals correctly instead of orphaning children.
+  </div>
+</section>
+
+<section id="restart">
+  <h2>5. Restart policies</h2>
+  <table>
+    <tr><th>Policy</th><th>Behavior</th></tr>
+    <tr><td><code>no</code></td><td>Default — never restart automatically</td></tr>
+    <tr><td><code>on-failure</code></td><td>Restart only if the process exits with a non-zero code</td></tr>
+    <tr><td><code>always</code></td><td>Always restart, including after a Docker daemon restart</td></tr>
+    <tr><td><code>unless-stopped</code></td><td>Like <code>always</code>, but respects a manual <code>docker stop</code></td></tr>
+  </table>
+  <div class="box tip">
+    <code>on-failure</code> is often the safer default in a Compose stack: narrower than
+    <code>always</code> on purpose. A container that exits 0 (a deliberate stop) stays stopped,
+    while a crash (non-zero exit) gets retried. A misconfigured service then doesn't mask itself
+    behind an infinite restart loop that looks like "it's running" in <code>docker ps</code>.
+  </div>
+</section>
+
+<section id="exec">
+  <h2>6. Getting inside a running container</h2>
+  <pre><code># Run an interactive shell inside an already-running container
+docker exec -it mariadb bash
+
+# View logs (essential for debugging crash loops)
+docker logs wordpress
+docker logs -f wordpress    # follow, like tail -f
+
+# Copy files in/out without exec
+docker cp wordpress:/var/www/html/wp-config.php .</code></pre>
+</section>
+
+<section id="case">
+  <h2>7. Bootstrapping an app on first start</h2>
+  <p>
+    A container image is reused to start the same service over and over, but some setup — creating
+    a database and its users, writing a first-run config file, seeding an admin account — should
+    only happen <em>once</em>, the very first time that service's data directory is empty. Doing
+    this safely is the job of an entrypoint script that runs as PID 1: it checks whether setup has
+    already happened, does it if not, and then <code>exec</code>s into the real foreground process
+    so the service itself ends up as PID 1, instead of leaving a setup script running with the
+    service as its background child.
+  </p>
+  <pre><code>#!/bin/sh
+set -e
+
+DB_DIR=/var/lib/mysql
+
+if [ ! -d "$DB_DIR/mysql" ]; then
+  # First run: the data directory is empty, so nothing has been initialized yet.
+  mariadb-install-db --datadir="$DB_DIR" --user=mysql
+
+  # Start mariadbd briefly, in the background, just to run setup SQL against it.
+  mariadbd --datadir="$DB_DIR" --user=mysql --skip-networking &
+  pid="$!"
+  until mariadb-admin ping --silent 2>/dev/null; do sleep 0.5; done
+
+  mariadb <<-SQL
+    CREATE DATABASE IF NOT EXISTS app;
+    CREATE USER IF NOT EXISTS 'app_user'@'%' IDENTIFIED BY '$(cat /run/secrets/db_password)';
+    GRANT ALL ON app.* TO 'app_user'@'%';
+SQL
+
+  # Stop the temporary instance; the real one below takes over as PID 1.
+  mariadb-admin shutdown
+  wait "$pid"
+fi
+
+# exec replaces the shell — mariadbd becomes PID 1 for the life of the container
+exec mariadbd --datadir="$DB_DIR" --user=mysql</code></pre>
+  <ul>
+    <li><strong>The guard (<code>if [ ! -d ... ]</code>)</strong> — checking for evidence that setup already ran is what makes the script idempotent. Without it, every container restart would try to recreate the database and fail, or silently reset state.</li>
+    <li><strong>A throwaway instance for setup SQL</strong> — the database needs to actually be running to execute <code>CREATE USER</code>/<code>GRANT</code>, so the script starts it temporarily, runs the SQL, then shuts it down before handing off to the real process.</li>
+    <li><strong><code>exec</code> at the end</strong> — this is the same exec-form distinction from Tutorial 6: without it, the script stays PID 1 and the real service runs as its child, which breaks signal handling on <code>docker stop</code>.</li>
+  </ul>
+  <div class="box tip">
+    This exact shape — guard, one-time setup, exec into the foreground process — is what's behind
+    most official images' entrypoints (MariaDB's, Postgres's, WordPress's). Writing your own version
+    of it is really just making that pattern explicit instead of relying on an upstream image to do
+    it for you.
+  </div>
+</section>
+
+<section id="commands">
+  <h2>8. Useful commands</h2>
+  <pre><code># List running / all containers
+docker ps
+docker ps -a
+
+# Stop, start, restart, remove
+docker stop wordpress
+docker start wordpress
+docker restart wordpress
+docker rm wordpress
+
+# Resource usage live
+docker stats
+
+# Process list inside a container's PID namespace
+docker top wordpress</code></pre>
+</section>
+
+</main>
+
+<footer>
+  Docker Tutorial 3 of 10 — Containers
+</footer>
+
+</body>
+</html>

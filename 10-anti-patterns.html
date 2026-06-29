@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Docker Tutorial 10 — Container Anti-Patterns</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Container Anti-Patterns</h1>
+  <p>Tutorial 10 of 10 — a practical Docker series</p>
+</header>
+
+<div class="series-nav">
+  <a href="1-what-why.html">1. What &amp; Why</a>
+  <a href="2-images.html">2. Images</a>
+  <a href="3-containers.html">3. Containers</a>
+  <a href="4-volumes.html">4. Volumes</a>
+  <a href="5-network.html">5. Network</a>
+  <a href="6-dockerfile.html">6. Dockerfile</a>
+  <a href="7-docker-compose.html">7. Compose</a>
+  <a href="8-env.html">8. Env</a>
+  <a href="9-secrets.html">9. Secrets</a>
+  <a href="10-anti-patterns.html" class="current">10. Anti-Patterns</a>
+</div>
+
+<nav>
+  <ul>
+    <li><a href="#problem">1. Things that "work" while breaking the model</a></li>
+    <li><a href="#host-network">2. network: host as a shortcut</a></li>
+    <li><a href="#link">3. --link instead of a user-defined network</a></li>
+    <li><a href="#busy-loop">4. Infinite-loop entrypoints</a></li>
+    <li><a href="#why">5. Why these specifically are worth calling out</a></li>
+    <li><a href="#commands">6. Spotting them</a></li>
+  </ul>
+</nav>
+
+<main>
+
+<section id="problem">
+  <h2>1. Things that "work" while breaking the model</h2>
+  <p>
+    Every pattern on this page produces a container that runs, serves traffic, and looks fine in
+    <code>docker ps</code>. That's exactly what makes them dangerous to learn from trial and error:
+    nothing crashes immediately, so there's no obvious signal that you've sidestepped the isolation,
+    networking, or lifecycle guarantees Docker is supposed to give you.
+  </p>
+  <div class="box warn">
+    A working container and a <em>correct</em> container aren't the same thing. Each pattern below
+    trades away something Docker exists to provide — isolation, service discovery, or a meaningful
+    running/stopped state — usually to dodge a problem that has a real fix elsewhere.
+  </div>
+</section>
+
+<section id="host-network">
+  <h2>2. network: host as a shortcut</h2>
+  <pre><code># Looks like it solves "the container can't reach my service" instantly:
+services:
+  app:
+    network_mode: host</code></pre>
+  <p>
+    <code>host</code> networking makes the container share the host's network namespace directly —
+    no virtual interface, no isolation, no port mapping. It's a real driver with real uses
+    (Tutorial 5, section 2) for performance-sensitive single-purpose tools. Reached for as a fix for
+    "my multi-container app can't talk to itself," it's an anti-pattern: it papers over a
+    user-defined bridge network and DNS-based service discovery that were never set up correctly,
+    and it silently removes the isolation between every container using it and the host's own
+    network stack.
+  </p>
+  <div class="box tip">
+    If two services genuinely can't reach each other, the fix is almost always a shared
+    user-defined bridge network and the right service name — not collapsing the network namespace
+    boundary entirely.
+  </div>
+</section>
+
+<section id="link">
+  <h2>3. --link instead of a user-defined network</h2>
+  <pre><code># Legacy flag, still works, shouldn't be reached for:
+docker run --link mariadb:db wordpress</code></pre>
+  <p>
+    <code>--link</code> predates user-defined bridge networks and Docker's embedded DNS server. It
+    wires up a one-directional connection and a hardcoded <code>/etc/hosts</code> entry on the
+    linking container — fragile, undocumented in current Docker releases, and replaced entirely by
+    just attaching both containers to the same user-defined network (Tutorial 5, section 3), which
+    gives every container on it two-way name resolution automatically.
+  </p>
+  <div class="box warn">
+    There's no scenario where <code>--link</code> does something a shared network can't do better.
+    Seeing it in a Dockerfile or run command is a sign the network setup was never actually fixed —
+    just worked around.
+  </div>
+</section>
+
+<section id="busy-loop">
+  <h2>4. Infinite-loop entrypoints</h2>
+  <pre><code># All three keep the container "running" without it doing anything:
+CMD ["tail", "-f", "/dev/null"]
+CMD ["sleep", "infinity"]
+CMD ["sh", "-c", "while true; do sleep 1; done"]</code></pre>
+  <p>
+    Each of these is reached for the same way: something needs to start first, or the real command
+    keeps exiting, so a no-op loop becomes PID 1 to keep <code>docker ps</code> showing "Up". This
+    directly contradicts the PID 1 model from Tutorial 3, section 4 — PID 1 existing is not the
+    same as the service being healthy or even present. A container "running" a busy-loop has no
+    actual workload inside it; <code>docker exec</code> into it and there's nothing listening on any
+    port.
+  </p>
+  <div class="box warn">
+    <strong>The usual root cause</strong> is either: (1) the entrypoint script never reaches its
+    final <code>exec</code> into the real service because setup is failing silently, or (2) someone
+    used the container as a long-lived debugging shell instead of fixing the actual command that
+    should be PID 1. Both are worth tracking down directly rather than papering over with a loop.
+  </div>
+</section>
+
+<section id="why">
+  <h2>5. Why these specifically are worth calling out</h2>
+  <p>
+    All three share the same shape: a real, sometimes-legitimate Docker feature (host networking,
+    a legacy flag, a shell loop) used to avoid fixing a different problem (network configuration,
+    DNS setup, a broken entrypoint) rather than for its actual purpose. None of them throw an error.
+    All of them pass a casual "does it run?" check. That combination — silent, plausible-looking,
+    and wrong — is what makes them worth specifically watching for in review, not just something
+    a test suite will catch.
+  </p>
+</section>
+
+<section id="commands">
+  <h2>6. Spotting them</h2>
+  <pre><code># Check what network mode a container is actually using
+docker inspect -f '{{.HostConfig.NetworkMode}}' some_container
+
+# --link shows up here if anything still uses it
+docker inspect -f '{{json .HostConfig.Links}}' some_container
+
+# A container "running" a busy-loop has nothing meaningful in its process list
+docker top some_container</code></pre>
+</section>
+
+</main>
+
+<footer>
+  Docker Tutorial 10 of 10 — Container Anti-Patterns
+</footer>
+
+</body>
+</html>

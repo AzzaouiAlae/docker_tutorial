@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Docker Tutorial 8 — Environment Variables</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Environment Variables in Docker</h1>
+  <p>Tutorial 8 of 10 — a practical Docker series</p>
+</header>
+
+<div class="series-nav">
+  <a href="1-what-why.html">1. What &amp; Why</a>
+  <a href="2-images.html">2. Images</a>
+  <a href="3-containers.html">3. Containers</a>
+  <a href="4-volumes.html">4. Volumes</a>
+  <a href="5-network.html">5. Network</a>
+  <a href="6-dockerfile.html">6. Dockerfile</a>
+  <a href="7-docker-compose.html">7. Compose</a>
+  <a href="8-env.html" class="current">8. Env</a>
+  <a href="9-secrets.html">9. Secrets</a>
+  <a href="10-anti-patterns.html">10. Anti-Patterns</a>
+</div>
+
+<nav>
+  <ul>
+    <li><a href="#what">1. Why environment variables, not hardcoded config</a></li>
+    <li><a href="#sources">2. Where env vars can come from</a></li>
+    <li><a href="#precedence">3. Precedence when sources overlap</a></li>
+    <li><a href="#substitution">4. Variable substitution inside docker-compose.yml</a></li>
+    <li><a href="#case">5. A real .env, explained</a></li>
+    <li><a href="#secrets-vs-env">6. Env vars vs. secrets — why split them</a></li>
+    <li><a href="#commands">7. Useful commands</a></li>
+  </ul>
+</nav>
+
+<main>
+
+<section id="what">
+  <h2>1. Why environment variables, not hardcoded config</h2>
+  <p>
+    The same image (e.g. <code>wordpress:1.0</code>) might need a different DB host, port, or
+    domain depending on where it's deployed. Baking those values into the image means rebuilding it
+    for every change. Environment variables let you inject configuration <em>at container-start
+    time</em>, keeping the image generic and reusable while the deployment-specific values live
+    outside it.
+  </p>
+</section>
+
+<section id="sources">
+  <h2>2. Where env vars can come from</h2>
+  <table>
+    <tr><th>Source</th><th>Mechanism</th></tr>
+    <tr><td>Dockerfile</td><td><code>ENV KEY=value</code> — baked into the image, becomes the default for every container from it</td></tr>
+    <tr><td><code>docker run</code></td><td><code>-e KEY=value</code> on the command line</td></tr>
+    <tr><td>Compose <code>environment:</code></td><td>Inline list/map in <code>docker-compose.yml</code></td></tr>
+    <tr><td>Compose <code>env_file:</code></td><td>Points at a file (e.g. <code>.env</code>) of <code>KEY=value</code> lines, loaded into the container</td></tr>
+    <tr><td>Shell environment</td><td>Compose substitutes <code>${VAR}</code> in the YAML itself from your shell or a <code>.env</code> file next to the compose file</td></tr>
+  </table>
+</section>
+
+<section id="precedence">
+  <h2>3. Precedence when sources overlap</h2>
+  <p>
+    From lowest to highest priority: Dockerfile <code>ENV</code> &lt; Compose
+    <code>env_file:</code> &lt; Compose <code>environment:</code> &lt; a value passed with
+    <code>docker run -e</code>/<code>docker compose run -e</code>. The more specific, more
+    runtime-adjacent source always wins.
+  </p>
+</section>
+
+<section id="substitution">
+  <h2>4. Variable substitution inside docker-compose.yml</h2>
+  <p>
+    Compose treats the YAML file itself as a template: before parsing, it substitutes
+    <code>${VAR}</code> placeholders using variables from your shell environment or from a
+    <code>.env</code> file sitting next to <code>docker-compose.yml</code>. This is a different
+    mechanism from <code>env_file:</code>, which only injects variables <em>into the container</em> —
+    substitution happens earlier, in the YAML text itself.
+  </p>
+  <pre><code>ports:
+  - "${NGINX_PORT}:${NGINX_PORT}"</code></pre>
+  <div class="box tip">
+    This is exactly how a single <code>.env</code> file can both configure the container's runtime
+    environment (via <code>env_file:</code>) <em>and</em> drive structural parts of the compose file
+    itself, like which port gets published — one source of truth, two different consumers.
+  </div>
+</section>
+
+<section id="case">
+  <h2>5. A real .env, explained</h2>
+  <p>A typical project-root <code>.env</code> holds keys like:</p>
+  <pre><code>NGINX_PORT=...
+MARIADB_PORT=...
+WP_DB_USER=...
+DB_HOST=...
+DB_NAME=...
+REDIS_PORT=...
+FTP_PORT=...
+ADMINER_PORT=...</code></pre>
+  <p>Each service block references <code>.env</code> via <code>env_file: - .env</code>, and the
+  compose file itself uses <code>${NGINX_PORT}</code>-style substitution for port mappings. Splitting
+  config this way means:</p>
+  <ul>
+    <li>Changing a port or hostname is a one-line edit in <code>.env</code>, no Dockerfile rebuild needed.</li>
+    <li>Every service that needs <code>DB_HOST=mariadb</code> reads the exact same value — no risk of one service's config drifting from another's.</li>
+  </ul>
+  <div class="box warn">
+    <strong>Notice what's missing from <code>.env</code>:</strong> there are no <code>*_PASSWORD</code>
+    keys in the list above. Passwords belong in Docker secrets instead — see Tutorial 9 for why that
+    split exists and isn't just stylistic.
+  </div>
+</section>
+
+<section id="secrets-vs-env">
+  <h2>6. Env vars vs. secrets — why split them</h2>
+  <p>
+    Environment variables are visible to anyone who can run <code>docker inspect</code> on the
+    container, and they often leak into logs, crash dumps, or child-process environments. They're
+    fine for non-sensitive config (ports, hostnames, usernames) but a poor fit for passwords and keys
+    — which is precisely the gap Docker secrets (Tutorial 9) fill.
+  </p>
+</section>
+
+<section id="commands">
+  <h2>7. Useful commands</h2>
+  <pre><code># See the fully-resolved compose config, with all ${VAR} substitution applied
+docker compose config
+
+# Check what env vars actually landed inside a running container
+docker exec wordpress env
+
+# Inspect just the env vars baked into an image (from its Dockerfile)
+docker inspect -f '{{.Config.Env}}' wordpress:1.0</code></pre>
+</section>
+
+</main>
+
+<footer>
+  Docker Tutorial 8 of 10 — Environment Variables
+</footer>
+
+</body>
+</html>

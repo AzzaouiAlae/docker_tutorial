@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Docker Tutorial 5 — Networking</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Docker Networking</h1>
+  <p>Tutorial 5 of 10 — a practical Docker series</p>
+</header>
+
+<div class="series-nav">
+  <a href="1-what-why.html">1. What &amp; Why</a>
+  <a href="2-images.html">2. Images</a>
+  <a href="3-containers.html">3. Containers</a>
+  <a href="4-volumes.html">4. Volumes</a>
+  <a href="5-network.html" class="current">5. Network</a>
+  <a href="6-dockerfile.html">6. Dockerfile</a>
+  <a href="7-docker-compose.html">7. Compose</a>
+  <a href="8-env.html">8. Env</a>
+  <a href="9-secrets.html">9. Secrets</a>
+  <a href="10-anti-patterns.html">10. Anti-Patterns</a>
+</div>
+
+<nav>
+  <ul>
+    <li><a href="#what">1. What is a Docker network?</a></li>
+    <li><a href="#types">2. Network drivers</a></li>
+    <li><a href="#bridge">3. User-defined bridge networks</a></li>
+    <li><a href="#dns">4. DNS-based service discovery</a></li>
+    <li><a href="#compose">5. Networks in docker-compose.yml</a></li>
+    <li><a href="#depends">6. depends_on vs network readiness</a></li>
+    <li><a href="#commands">7. Useful commands</a></li>
+    <li><a href="#case">8. Putting it together</a></li>
+  </ul>
+</nav>
+
+<main>
+
+<section id="what">
+  <h2>1. What is a Docker network?</h2>
+  <p>
+    Every container gets its own network namespace — its own loopback interface, routing table,
+    and IP address — isolated from the host and from other containers by default. A Docker
+    <strong>network</strong> is a virtual switch that connects the namespaces of selected
+    containers together so they can talk to each other, while staying isolated from containers
+    that aren't on that network.
+  </p>
+  <div class="diagram">
+Host machine
+ ├── eth0 (physical/host NIC)
+ └── docker0 / br-xxxx (virtual bridge = the "network")
+      ├── veth → container A  (nginx)      10.0.5.2
+      ├── veth → container B  (wordpress)  10.0.5.3
+      └── veth → container C  (mariadb)    10.0.5.4
+  </div>
+</section>
+
+<section id="types">
+  <h2>2. Network drivers</h2>
+  <table>
+    <tr><th>Driver</th><th>Use case</th></tr>
+    <tr><td><code>bridge</code></td><td>Default for standalone/Compose containers on a single host. What you're using.</td></tr>
+    <tr><td><code>host</code></td><td>Container shares the host's network namespace directly — no isolation, no port mapping needed.</td></tr>
+    <tr><td><code>none</code></td><td>No networking at all — fully isolated container.</td></tr>
+    <tr><td><code>overlay</code></td><td>Connects containers across <em>multiple Docker hosts</em> (Swarm mode).</td></tr>
+    <tr><td><code>macvlan</code></td><td>Gives a container its own MAC address on the physical LAN.</td></tr>
+  </table>
+  <div class="box tip">
+    <strong>In practice:</strong> a single-host <code>bridge</code> network is the right default for
+    most Compose stacks — all your services run on one machine, and you just need them to find each other.
+  </div>
+</section>
+
+<section id="bridge">
+  <h2>3. User-defined bridge networks</h2>
+  <p>
+    Docker has a default <code>bridge</code> network, but it's intentionally limited: containers on it
+    can only reach each other by IP, not by name. A <strong>user-defined bridge</strong>
+    (what <code>app_network</code> is) fixes that and adds:
+  </p>
+  <ul>
+    <li>Automatic DNS resolution by container/service name</li>
+    <li>Better isolation — only containers explicitly attached can communicate</li>
+    <li>Ability to attach/detach containers without restarting them</li>
+  </ul>
+  <pre><code># Equivalent manual commands to what Compose does for you:
+docker network create app_network
+docker run --network app_network --name mariadb mariadb
+docker run --network app_network --name wordpress wordpress</code></pre>
+</section>
+
+<section id="dns">
+  <h2>4. DNS-based service discovery</h2>
+  <p>
+    On a user-defined bridge, Docker runs an embedded DNS server (<code>127.0.0.11</code> inside each
+    container). Any container on the same network can resolve another container's
+    <strong>name</strong> (or Compose service name) straight to its internal IP — no hardcoded
+    IPs, no <code>/etc/hosts</code> editing.
+  </p>
+  <pre><code># Inside the wordpress container, this just works:
+ping mariadb
+mysql -h mariadb -u wp_user -p</code></pre>
+  <div class="box tip">
+    This is exactly why your WordPress config can use <code>DB_HOST=mariadb</code> instead of an IP —
+    Compose registers each service's container name as a DNS entry on <code>app_network</code>.
+  </div>
+</section>
+
+<section id="compose">
+  <h2>5. Networks in docker-compose.yml</h2>
+  <p>Declaring a network in Compose has two parts: a top-level definition, and per-service attachment.</p>
+  <pre><code>networks:
+  app_network:
+    name: app_network   # fixed name instead of "srcs_app_network"
+
+services:
+  nginx:
+    networks:
+      - app_network
+  wordpress:
+    networks:
+      - app_network</code></pre>
+  <div class="box warn">
+    <strong>Without</strong> a top-level <code>networks:</code> block, Compose still creates a default
+    network automatically (named <code>&lt;project&gt;_default</code>) and attaches every service to it.
+    Defining <code>app_network</code> explicitly just gives you a predictable, fixed name and
+    lets you control its driver/options.
+  </div>
+</section>
+
+<section id="depends">
+  <h2>6. depends_on vs. network readiness</h2>
+  <p>
+    <code>depends_on</code> only controls <strong>start order</strong> (and with
+    <code>condition: service_healthy</code>, readiness) — it does <em>not</em> wait for the
+    application inside the container to be ready to accept connections.
+  </p>
+  <pre><code>wordpress:
+  depends_on:
+    - mariadb   # mariadb's container starts first, but MySQL itself
+                # might not be ready to accept connections yet</code></pre>
+  <div class="box warn">
+    <strong>Common pitfall:</strong> WordPress trying to connect to MariaDB before MySQL has finished
+    initializing. The network connection itself isn't the problem — name resolution works immediately —
+    it's that nothing is listening on port 3306 yet. Fix with a healthcheck +
+    <code>condition: service_healthy</code>, or retry logic in your entrypoint script.
+  </div>
+</section>
+
+<section id="commands">
+  <h2>7. Useful commands</h2>
+  <pre><code># List all networks
+docker network ls
+
+# Inspect a network: connected containers, subnet, gateway
+docker network inspect app_network
+
+# See which networks a running container is on
+docker inspect -f '{{json .NetworkSettings.Networks}}' nginx
+
+# Test name resolution / connectivity from inside a container
+docker exec -it wordpress ping -c1 mariadb
+docker exec -it wordpress nslookup mariadb
+
+# Manually attach a running container to a network
+docker network connect app_network some_container</code></pre>
+</section>
+
+<section id="case">
+  <h2>8. Putting it together</h2>
+  <p>In a typical <code>docker-compose.yml</code>, every service lists:</p>
+  <pre><code>networks:
+  - app_network</code></pre>
+  <p>and the network itself is declared once at the bottom:</p>
+  <pre><code>networks:
+  app_network:
+    name: app_network</code></pre>
+  <p>What this gives you, for a stack like nginx + wordpress + mariadb + redis:</p>
+  <ul>
+    <li>All services share one isolated bridge network.</li>
+    <li>Each container reaches the others by service/container name — e.g. nginx does FastCGI to <code>wordpress:9000</code> (php-fpm), and wordpress connects to <code>mariadb:3306</code> and <code>redis:6379</code>.</li>
+    <li>Only the ports you explicitly publish (<code>ports:</code>) are reachable from outside the host — everything else stays internal to <code>app_network</code>, which is good security practice (e.g. a database with no published port).</li>
+  </ul>
+  <div class="box tip">
+    <strong>Why one shared network instead of several?</strong> A single network is usually enough so
+    every service can reach every other service it needs, without managing multiple network
+    definitions. You'd only split into separate networks if you actually want to isolate groups of
+    services from each other (e.g. keeping a monitoring stack off the same network as a public-facing one).
+  </div>
+</section>
+
+</main>
+
+<footer>
+  Docker Tutorial 5 of 10 — Networking
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Docker Tutorial 6 — Dockerfile</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Writing a Dockerfile</h1>
+  <p>Tutorial 6 of 10 — a practical Docker series</p>
+</header>
+
+<div class="series-nav">
+  <a href="1-what-why.html">1. What &amp; Why</a>
+  <a href="2-images.html">2. Images</a>
+  <a href="3-containers.html">3. Containers</a>
+  <a href="4-volumes.html">4. Volumes</a>
+  <a href="5-network.html">5. Network</a>
+  <a href="6-dockerfile.html" class="current">6. Dockerfile</a>
+  <a href="7-docker-compose.html">7. Compose</a>
+  <a href="8-env.html">8. Env</a>
+  <a href="9-secrets.html">9. Secrets</a>
+  <a href="10-anti-patterns.html">10. Anti-Patterns</a>
+</div>
+
+<nav>
+  <ul>
+    <li><a href="#what">1. What a Dockerfile is</a></li>
+    <li><a href="#instructions">2. Core instructions</a></li>
+    <li><a href="#cache">3. Layer caching and instruction order</a></li>
+    <li><a href="#cmd-entrypoint">4. CMD vs. ENTRYPOINT</a></li>
+    <li><a href="#case">5. A mariadb Dockerfile, line by line</a></li>
+    <li><a href="#practices">6. Practices that actually matter</a></li>
+    <li><a href="#commands">7. Useful commands</a></li>
+  </ul>
+</nav>
+
+<main>
+
+<section id="what">
+  <h2>1. What a Dockerfile is</h2>
+  <p>
+    A Dockerfile is a plain-text script of instructions that <code>docker build</code> executes in
+    order to produce an image. Each instruction normally creates one new layer on top of the
+    previous state (Tutorial 2). Writing your own Dockerfile, rather than pulling a finished image
+    of the service itself, is what makes the build process inspectable and reproducible.
+  </p>
+</section>
+
+<section id="instructions">
+  <h2>2. Core instructions</h2>
+  <table>
+    <tr><th>Instruction</th><th>Purpose</th></tr>
+    <tr><td><code>FROM</code></td><td>The base image everything else builds on. Must be the first real instruction.</td></tr>
+    <tr><td><code>RUN</code></td><td>Executes a command at build time and commits the filesystem change as a layer.</td></tr>
+    <tr><td><code>COPY</code></td><td>Copies files from the build context (your host) into the image.</td></tr>
+    <tr><td><code>ADD</code></td><td>Like <code>COPY</code>, but can also fetch URLs and auto-extract archives — prefer <code>COPY</code> unless you specifically need that.</td></tr>
+    <tr><td><code>WORKDIR</code></td><td>Sets the working directory for subsequent instructions and the container's default CWD.</td></tr>
+    <tr><td><code>EXPOSE</code></td><td>Documents which port the container listens on (doesn't publish it — that's Compose's <code>ports:</code>).</td></tr>
+    <tr><td><code>ENV</code></td><td>Sets an environment variable baked into the image. Covered further in Tutorial 8.</td></tr>
+    <tr><td><code>USER</code></td><td>Switches which user subsequent instructions and the container's process run as.</td></tr>
+    <tr><td><code>CMD</code> / <code>ENTRYPOINT</code></td><td>What runs when the container starts. See section 4.</td></tr>
+  </table>
+</section>
+
+<section id="cache">
+  <h2>3. Layer caching and instruction order</h2>
+  <p>
+    Docker caches each layer and reuses it on the next build if the instruction and its inputs are
+    unchanged. As soon as one instruction's cache misses (e.g. a changed source file), every
+    instruction after it also misses, even if they wouldn't have changed. So order matters:
+  </p>
+  <div class="diagram">
+Good order (rarely-changing → frequently-changing):
+ FROM alpine:3.23
+ RUN apk update                      ← cached almost always
+ RUN apk add --no-cache mariadb ...  ← cached almost always
+ COPY ./tools/script.sh /app/        ← only this re-runs when you edit the script
+ CMD ["/app/script.sh"]
+
+Bad order — any source edit invalidates the expensive apk install too:
+ FROM alpine:3.23
+ COPY . /app
+ RUN apk update
+ RUN apk add --no-cache mariadb ...
+  </div>
+  <div class="box warn">
+    <strong>The cache hit is blind to the outside world.</strong> Docker decides "reuse this layer"
+    purely from the instruction text and the parent layer — it has no idea Alpine's actual package
+    index changed since your last build. A long-lived cache hit on <code>RUN apk update</code> can
+    quietly mean you're building against a months-old package snapshot. If you need guaranteed-fresh
+    packages, use <code>docker build --no-cache</code> periodically rather than trusting the cache forever.
+  </div>
+</section>
+
+<section id="cmd-entrypoint">
+  <h2>4. CMD vs. ENTRYPOINT</h2>
+  <p>
+    Both define the container's startup process, but they compose differently:
+  </p>
+  <ul>
+    <li><code>CMD</code> alone — the default command, fully overridable by anything passed after the image name in <code>docker run</code>.</li>
+    <li><code>ENTRYPOINT</code> alone — always runs; anything from <code>docker run</code> is appended as arguments to it.</li>
+    <li>Both together — <code>ENTRYPOINT</code> is the fixed program, <code>CMD</code> supplies its default arguments (overridable).</li>
+  </ul>
+  <pre><code># Exec form (preferred): no shell wrapper, the binary becomes PID 1 directly
+CMD ["/app/script.sh"]
+
+# Shell form: runs via "/bin/sh -c", which becomes PID 1 instead of your process
+CMD /app/script.sh</code></pre>
+  <div class="box warn">
+    The exec form matters for the PID 1 / signal-handling reasons covered in Tutorial 3 — a shell
+    wrapper as PID 1 can swallow or mishandle <code>SIGTERM</code> on <code>docker stop</code>.
+  </div>
+</section>
+
+<section id="case">
+  <h2>5. A mariadb Dockerfile, line by line</h2>
+  <pre><code>FROM alpine:3.23
+
+RUN apk update
+RUN apk add --no-cache mariadb mariadb-client
+RUN mkdir -p /run/mysqld
+RUN chown -R mysql:mysql /run/mysqld
+
+COPY ./tools/script.sh /app/script.sh
+
+RUN chmod +x /app/script.sh
+
+CMD ["/app/script.sh"]</code></pre>
+  <ul>
+    <li><strong>FROM alpine:3.23</strong> — a minimal base, keeping image size and attack surface small.</li>
+    <li><strong>apk update / apk add</strong> — installs MariaDB server and client from Alpine's own package repo, not a pre-built MariaDB image.</li>
+    <li><strong>mkdir + chown /run/mysqld</strong> — MariaDB needs this socket directory to exist and be owned by the <code>mysql</code> user before it starts, or it refuses to launch.</li>
+    <li><strong>COPY script.sh + chmod +x</strong> — brings in your own entrypoint logic (first-run DB initialization, user/permissions setup) instead of relying on an upstream image's init scripts.</li>
+    <li><strong>CMD ["/app/script.sh"]</strong> — exec form, so your script (which should itself <code>exec mariadbd ...</code> at the end) ends up as PID 1.</li>
+  </ul>
+  <div class="box tip">
+    Notice there's no <code>EXPOSE 3306</code> here — that's fine; <code>EXPOSE</code> is purely
+    documentation. What actually matters for reachability is the network attachment from
+    Tutorial 5, not this Dockerfile.
+  </div>
+</section>
+
+<section id="practices">
+  <h2>6. Practices that actually matter</h2>
+  <ul>
+    <li><strong>No <code>:latest</code></strong> — pin a specific base image version (<code>alpine:3.23</code>, not <code>alpine</code>), so your build is reproducible months from now.</li>
+    <li><strong>One process per Dockerfile/container</strong> — don't install nginx and PHP in the same image meant to also run MariaDB.</li>
+    <li><strong>End with a foreground process</strong> — no <code>tail -f /dev/null</code>, no <code>sleep infinity</code> as the final command.</li>
+    <li><strong>Minimize layers sensibly</strong> — combining trivially related <code>RUN</code> commands with <code>&amp;&amp;</code> reduces layer count, but don't sacrifice readability or caching granularity to chase a smaller layer count.</li>
+  </ul>
+</section>
+
+<section id="commands">
+  <h2>7. Useful commands</h2>
+  <pre><code># Build with a tag, from a given build context directory
+docker build -t mariadb:1.0 ./mariadb
+
+# Rebuild ignoring the cache entirely (useful when debugging a stale layer)
+docker build --no-cache -t mariadb:1.0 ./mariadb
+
+# See exactly which instruction produced which layer, and its size
+docker history mariadb:1.0</code></pre>
+</section>
+
+</main>
+
+<footer>
+  Docker Tutorial 6 of 10 — Dockerfile
+</footer>
+
+</body>
+</html>

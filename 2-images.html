@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Docker Tutorial 2 — Images</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Docker Images</h1>
+  <p>Tutorial 2 of 10 — a practical Docker series</p>
+</header>
+
+<div class="series-nav">
+  <a href="1-what-why.html">1. What &amp; Why</a>
+  <a href="2-images.html" class="current">2. Images</a>
+  <a href="3-containers.html">3. Containers</a>
+  <a href="4-volumes.html">4. Volumes</a>
+  <a href="5-network.html">5. Network</a>
+  <a href="6-dockerfile.html">6. Dockerfile</a>
+  <a href="7-docker-compose.html">7. Compose</a>
+  <a href="8-env.html">8. Env</a>
+  <a href="9-secrets.html">9. Secrets</a>
+  <a href="10-anti-patterns.html">10. Anti-Patterns</a>
+</div>
+
+<nav>
+  <ul>
+    <li><a href="#what">1. What an image actually is</a></li>
+    <li><a href="#layers">2. Layers and the union filesystem</a></li>
+    <li><a href="#tags">3. Names, tags, and digests</a></li>
+    <li><a href="#registry">4. Registries and pulling</a></li>
+    <li><a href="#build">5. Building your own (preview of Tutorial 6)</a></li>
+    <li><a href="#inspect">6. Inspecting images</a></li>
+    <li><a href="#case">7. One service, one image</a></li>
+    <li><a href="#commands">8. Useful commands</a></li>
+  </ul>
+</nav>
+
+<main>
+
+<section id="what">
+  <h2>1. What an image actually is</h2>
+  <p>
+    An image is a read-only, immutable template for a filesystem plus metadata: the default command
+    to run, exposed ports, environment defaults, the working directory, the user to run as. It contains
+    no running process — it's a blueprint, not a thing in motion. When you <code>docker run</code> an
+    image, Docker takes that template and adds one writable layer on top: that combination is a
+    <strong>container</strong> (Tutorial 3).
+  </p>
+  <div class="box tip">
+    Every Dockerfile you write is the recipe for exactly one image. In a multi-service stack
+    (a web server, an app, a database), each service gets its own Dockerfile and its own image —
+    that's what keeps them independently buildable, taggable, and replaceable.
+  </div>
+</section>
+
+<section id="layers">
+  <h2>2. Layers and the union filesystem</h2>
+  <p>
+    An image isn't one big blob — it's a stack of read-only layers, each one a diff from the layer
+    below it. Every instruction in a Dockerfile that changes the filesystem (<code>RUN</code>,
+    <code>COPY</code>, <code>ADD</code>) produces a new layer. Docker stitches them together with a
+    union filesystem so the container sees one consistent view.
+  </p>
+  <div class="diagram">
+Image "myapp:1.0"
+ ├── layer 4: COPY conf.d/www.conf            ← your customization
+ ├── layer 3: RUN apt install php-fpm         ← your customization
+ ├── layer 2: RUN apt update                  ← your customization
+ └── layer 1: debian:bullseye-slim base       ← base image, downloaded once
+  </div>
+  <div class="box tip">
+    <strong>Why this matters:</strong> layers are cached and shared. If three of your Dockerfiles
+    start <code>FROM debian:bullseye</code>, that base layer is downloaded and stored once, not three
+    times. Reordering Dockerfile instructions so rarely-changing steps (installing packages) come
+    before frequently-changing ones (copying your own config) keeps rebuilds fast.
+  </div>
+</section>
+
+<section id="tags">
+  <h2>3. Names, tags, and digests</h2>
+  <p>An image reference has up to three parts:</p>
+  <pre><code>[registry/]repository[:tag]
+myapp:1.0
+docker.io/library/debian:bullseye-slim</code></pre>
+  <table>
+    <tr><th>Part</th><th>Meaning</th></tr>
+    <tr><td><code>repository</code></td><td>The image's name, e.g. <code>myapp</code></td></tr>
+    <tr><td><code>tag</code></td><td>A human label for a specific version, e.g. <code>1.0</code> or <code>11.4</code>. Defaults to <code>latest</code> if omitted.</td></tr>
+    <tr><td><code>digest</code></td><td>A content hash (<code>sha256:...</code>) — the only fully unambiguous way to pin an exact image, since tags can be overwritten.</td></tr>
+  </table>
+  <div class="box warn">
+    <strong>Pitfall:</strong> <code>latest</code> is just a tag like any other, not "the newest version" —
+    it's whatever the maintainer happened to push as <code>latest</code>. Pinning a real version (or a
+    digest) instead of floating on <code>latest</code> is what makes a build reproducible months later.
+  </div>
+</section>
+
+<section id="registry">
+  <h2>4. Registries and pulling</h2>
+  <p>
+    A registry is a server that stores images (Docker Hub is the default public one). <code>docker
+    pull</code> downloads an image's layers from a registry; <code>docker push</code> uploads them.
+    Layers you already have locally aren't re-downloaded — Docker checks layer hashes first.
+  </p>
+  <pre><code>docker pull debian:bullseye-slim
+docker pull alpine:3.20</code></pre>
+  <div class="box tip">
+    Minimal base images like <code>debian</code> or <code>alpine</code> are the normal starting point
+    for a custom build. The distinction that matters is between pulling a thin OS base layer you build
+    on top of, versus pulling a full pre-packaged application image and using it as-is.
+  </div>
+</section>
+
+<section id="build">
+  <h2>5. Building your own (preview of Tutorial 6)</h2>
+  <p>
+    <code>docker build</code> reads a Dockerfile and executes its instructions one by one, committing
+    a new layer after each one, to produce a new image. Tutorial 6 covers Dockerfile syntax in depth —
+    for now, just see the shape of the command:
+  </p>
+  <pre><code>docker build -t myapp:1.0 ./myapp</code></pre>
+</section>
+
+<section id="inspect">
+  <h2>6. Inspecting images</h2>
+  <pre><code># List local images
+docker images
+
+# See every layer and the command that created it
+docker history myapp:1.0
+
+# Full metadata: env vars, entrypoint, exposed ports, layer digests
+docker inspect myapp:1.0</code></pre>
+</section>
+
+<section id="case">
+  <h2>7. One service, one image</h2>
+  <p>
+    In a multi-service Compose project, each service directory builds to its own tagged image —
+    typically <code>&lt;service&gt;:&lt;tag&gt;</code> via <code>docker-compose.yml</code>'s
+    <code>build:</code> key pointing at that service's Dockerfile. That's why <code>docker images</code>
+    after a successful build shows one image per service instead of one giant shared image.
+  </p>
+  <div class="box tip">
+    <strong>One image, many containers:</strong> if you scale or restart a service, Compose reuses the
+    already-built image and just creates a fresh container from it — it doesn't rebuild unless the
+    Dockerfile or build context changed.
+  </div>
+</section>
+
+<section id="commands">
+  <h2>8. Useful commands</h2>
+  <pre><code># List, remove, and clean up images
+docker images
+docker rmi myapp:1.0
+docker image prune          # remove dangling (untagged) images
+docker image prune -a       # remove all unused images
+
+# Tag an existing image under a new name
+docker tag myapp:1.0 myapp:backup
+
+# Save/load an image as a tarball (no registry needed)
+docker save -o myapp.tar myapp:1.0
+docker load -i myapp.tar</code></pre>
+</section>
+
+</main>
+
+<footer>
+  Docker Tutorial 2 of 10 — Images
+</footer>
+
+</body>
+</html>
