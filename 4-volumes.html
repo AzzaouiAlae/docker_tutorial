@@ -30,11 +30,12 @@
     <li><a href="#problem">1. Why containers alone aren't enough for data</a></li>
     <li><a href="#types">2. Named volumes vs. bind mounts vs. tmpfs</a></li>
     <li><a href="#named">3. Named volumes in depth</a></li>
-    <li><a href="#bind">4. Bind mounts in depth</a></li>
-    <li><a href="#compose">5. Volumes in docker-compose.yml</a></li>
-    <li><a href="#case">6. Bind-mounting a fixed host path</a></li>
-    <li><a href="#verify">7. Proving the data actually survives</a></li>
-    <li><a href="#commands">8. Useful commands</a></li>
+    <li><a href="#anonymous">4. Anonymous volumes</a></li>
+    <li><a href="#bind">5. Bind mounts in depth</a></li>
+    <li><a href="#compose">6. Volumes in docker-compose.yml</a></li>
+    <li><a href="#case">7. Bind-mounting a fixed host path</a></li>
+    <li><a href="#verify">8. Proving the data actually survives</a></li>
+    <li><a href="#commands">9. Useful commands</a></li>
   </ul>
 </nav>
 
@@ -65,9 +66,11 @@
   </table>
   <div class="box tip">
     Some setups require volumes mounted at a specific, known host path rather than wherever Docker
-    decides to put them. That's still a <strong>bind mount</strong> with a fixed location, even
-    though Compose's <code>volumes:</code> syntax for it (a named entry with <code>driver_opts</code>)
-    looks similar to a plain named volume.
+    decides to put them. You can do this with a <strong>named volume</strong> whose
+    <code>driver_opts</code> pin it to that host path (<code>type: none</code>, <code>o: bind</code>,
+    <code>device: /that/path</code>) — it's still managed by Docker and shows up in
+    <code>docker volume ls</code>, it just uses bind-mount semantics under the hood instead of
+    Docker's default storage location.
   </div>
 </section>
 
@@ -85,8 +88,34 @@ docker run -v mariadb_data:/var/lib/mysql mariadb</code></pre>
   </p>
 </section>
 
+<section id="anonymous">
+  <h2>4. Anonymous volumes</h2>
+  <p>
+    An anonymous volume is what you get when you mount a container path to a volume <em>without</em>
+    giving it a name — Docker creates one anyway, but identifies it by a random hex ID instead of a
+    name you chose.
+  </p>
+  <pre><code>docker run -v /var/lib/mysql mariadb
+
+# Or, equivalently, via the Dockerfile
+VOLUME /var/lib/mysql</code></pre>
+  <p>
+    It behaves like a real named volume in every functional way — it's managed by Docker, lives
+    under <code>/var/lib/docker/volumes/...</code>, and survives the container being removed. The
+    only difference is that there's no memorable name to mount it again from a different container
+    or compose file; you'd have to look up its generated ID first.
+  </p>
+  <div class="box warn">
+    <strong>The trap:</strong> because anonymous volumes have no name to reference, it's easy to
+    accumulate orphaned ones every time you recreate a container that declares a <code>VOLUME</code>
+    in its Dockerfile (many official database images do this). <code>docker volume prune</code> is
+    how you clean them up — but that also means data you assumed was disposable can quietly
+    disappear if you run it without checking what's actually using each volume first.
+  </div>
+</section>
+
 <section id="bind">
-  <h2>4. Bind mounts in depth</h2>
+  <h2>5. Bind mounts in depth</h2>
   <p>
     A bind mount maps an exact host directory into the container. Changes are visible
     instantly on both sides — it's literally the same files, not a copy.
@@ -104,7 +133,7 @@ docker run --mount type=bind,source=/srv/app/data/wordpress,target=/var/www/html
 </section>
 
 <section id="compose">
-  <h2>5. Volumes in docker-compose.yml</h2>
+  <h2>6. Volumes in docker-compose.yml</h2>
   <pre><code>services:
   mariadb:
     volumes:
@@ -126,7 +155,7 @@ volumes:
 </section>
 
 <section id="case">
-  <h2>6. Bind-mounting a fixed host path</h2>
+  <h2>7. Bind-mounting a fixed host path</h2>
   <p>
     A database's data directory or an app's web root is often backed by a volume defined this way,
     so that:
@@ -144,7 +173,7 @@ volumes:
 </section>
 
 <section id="verify">
-  <h2>7. Proving the data actually survives</h2>
+  <h2>8. Proving the data actually survives</h2>
   <p>
     It's easy to <em>believe</em> a volume persists data without ever checking. Recreating the
     container and confirming the data is still there only takes a minute, and it's the only way to
@@ -174,7 +203,7 @@ docker exec mariadb cat /var/lib/mysql/proof.txt   # → hello</code></pre>
 </section>
 
 <section id="commands">
-  <h2>8. Useful commands</h2>
+  <h2>9. Useful commands</h2>
   <pre><code># List, inspect, remove volumes
 docker volume ls
 docker volume inspect mariadb_data
