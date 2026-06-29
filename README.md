@@ -6,16 +6,16 @@ that quietly break the container model.
 
 ## Start here
 
-1. [What is Docker? Why Docker?](https://azzaouialae.github.io/docker_tutorial/index.html) — the problem before containers, what an image/container/engine actually are, Docker vs. a VM.
-2. [Images](https://azzaouialae.github.io/docker_tutorial/2-images.html) — layers, the image cache, tags, registries.
-3. [Containers](https://azzaouialae.github.io/docker_tutorial/3-containers.html) — lifecycle, namespaces/cgroups, PID 1, restart policies, bootstrapping an app on first start.
-4. [Volumes](https://azzaouialae.github.io/docker_tutorial/4-volumes.html) — named volumes vs. bind mounts vs. tmpfs, and proving persistence actually survives a recreate.
-5. [Network](https://azzaouialae.github.io/docker_tutorial/5-network.html) — bridge networks, DNS-based service discovery, `depends_on` vs. readiness.
-6. [Dockerfile](https://azzaouialae.github.io/docker_tutorial/6-dockerfile.html) — core instructions, layer caching, `CMD` vs. `ENTRYPOINT`, practices that matter.
-7. [Docker Compose](https://azzaouialae.github.io/docker_tutorial/7-docker-compose.html) — anatomy of `docker-compose.yml`, standalone containers vs. Compose-managed, wrapping Compose in a Makefile.
-8. [Env](https://azzaouialae.github.io/docker_tutorial/8-env.html) — environment variables and `.env` files.
-9. [Secrets](https://azzaouialae.github.io/docker_tutorial/9-secrets.html) — file-based secrets, TLS termination at nginx.
-10. [Anti-Patterns](https://azzaouialae.github.io/docker_tutorial/10-anti-patterns.html) — things that look like they work but defeat the container model (`network: host`, `--link`, infinite-loop entrypoints).
+1. <a href="https://azzaouialae.github.io/docker_tutorial/index.html" target="_blank" rel="noopener noreferrer">What is Docker? Why Docker?</a> — the problem before containers, what an image/container/engine actually are, Docker vs. a VM.
+2. <a href="https://azzaouialae.github.io/docker_tutorial/2-images.html" target="_blank" rel="noopener noreferrer">Images</a> — layers, the image cache, tags, registries.
+3. <a href="https://azzaouialae.github.io/docker_tutorial/3-containers.html" target="_blank" rel="noopener noreferrer">Containers</a> — lifecycle, namespaces/cgroups, PID 1, restart policies, bootstrapping an app on first start.
+4. <a href="https://azzaouialae.github.io/docker_tutorial/4-volumes.html" target="_blank" rel="noopener noreferrer">Volumes</a> — named volumes vs. bind mounts vs. tmpfs, and proving persistence actually survives a recreate.
+5. <a href="https://azzaouialae.github.io/docker_tutorial/5-network.html" target="_blank" rel="noopener noreferrer">Network</a> — bridge networks, DNS-based service discovery, `depends_on` vs. readiness.
+6. <a href="https://azzaouialae.github.io/docker_tutorial/6-dockerfile.html" target="_blank" rel="noopener noreferrer">Dockerfile</a> — core instructions, layer caching, `CMD` vs. `ENTRYPOINT`, practices that matter.
+7. <a href="https://azzaouialae.github.io/docker_tutorial/7-docker-compose.html" target="_blank" rel="noopener noreferrer">Docker Compose</a> — anatomy of `docker-compose.yml`, standalone containers vs. Compose-managed, wrapping Compose in a Makefile.
+8. <a href="https://azzaouialae.github.io/docker_tutorial/8-env.html" target="_blank" rel="noopener noreferrer">Env</a> — environment variables and `.env` files.
+9. <a href="https://azzaouialae.github.io/docker_tutorial/9-secrets.html" target="_blank" rel="noopener noreferrer">Secrets</a> — file-based secrets, TLS termination at nginx.
+10. <a href="https://azzaouialae.github.io/docker_tutorial/10-anti-patterns.html" target="_blank" rel="noopener noreferrer">Anti-Patterns</a> — things that look like they work but defeat the container model (`network: host`, `--link`, infinite-loop entrypoints).
 
 Each page links to the next via the nav bar at the top, so you can also just
 start at part 1 and read straight through.
